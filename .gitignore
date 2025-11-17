@@ -1,0 +1,170 @@
+# ==================================================
+# Weapon Detection System - .gitignore
+# ==================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# PyTorch & Training
+*.pth
+*.pt
+*.onnx
+*.engine
+*.trt
+*.weights
+
+# Dataset (giữ cấu trúc nhưng bỏ qua dữ liệu)
+dataset/train/images/
+dataset/train/labels/
+dataset/val/images/
+dataset/val/labels/
+dataset/test/images/
+dataset/test/labels/
+!dataset/train/.gitkeep
+!dataset/val/.gitkeep
+!dataset/test/.gitkeep
+
+# Images & Videos
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# Training Runs & Outputs
+runs/detect/*
+runs/train/*
+runs/predict/*
+runs/models/*
+runs/video/*
+runs/alerts_snapshots/*
+runs/realtime_logs/*.csv
+!runs/.gitkeep
+!runs/detect/.gitkeep
+!runs/models/.gitkeep
+
+# Logs
+logs/
+*.log
+*.out
+
+# MongoDB Database Files
+data/db/
+*.lock
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# Temporary Files
+temp/
+tmp/
+*.tmp
+*.bak
+*.backup
+*.cache
+
+# Generated Requirements
+requirements_generated.txt
+
+# System Files
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage & Testing
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# Large Model Files (nếu có)
+*.h5
+*.hdf5
+yolov5/
+yolov8m.pt
+yolov8n.pt
+yolov8s.pt
+yolov8l.pt
+yolov8x.pt
+
+# API Keys & Secrets (đảm bảo không commit)
+*secret*
+*token*
+*api_key*
+credentials.json
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Misc
+*.zip
+*.tar.gz
+*.rar
+image.png

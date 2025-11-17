@@ -1,0 +1,21 @@
+train: C:/Workspace/weapon-detection/dataset/train/images
+val: C:/Workspace/weapon-detection/dataset/val/images
+test: C:/Workspace/weapon-detection/dataset/test/images
+
+nc: 6
+names:
+  - fire
+  - firearm
+  - grenade
+  - knife
+  - pistol
+  - rocket
+
+# roboflow:
+#   workspace: startup-zn0ol
+#   project: dangerous-objects-dq94u
+#   version: 8
+#   license: CC BY 4.0
+#   url: https://universe.roboflow.com/startup-zn0ol/dangerous-objects-dq94u/dataset/8
+#   url: https://universe.roboflow.com/aleenas-workspace/swords-annotations
+#   url: https://universe.roboflow.com/deeplearning-js2wt/dangerous-riqsq/dataset/4
