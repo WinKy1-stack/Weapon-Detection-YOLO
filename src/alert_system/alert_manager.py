@@ -27,9 +27,11 @@ def alert_worker():
             continue
 
         try:
-            frame, weapon_class, conf, distance, status = task
+            frame, weapon_class, conf, distance, status, person_box, weapon_box = task
             danger = get_danger_level(weapon_class, conf, distance)
-            img_path, timestamp = save_snapshot(frame, weapon_class)
+            
+            # Lưu snapshot với crop vùng người + vũ khí
+            img_path, timestamp = save_snapshot(frame, weapon_class, person_box, weapon_box)
 
             # Tạo dữ liệu cảnh báo (store timestamp as a proper datetime for sorting)
             alert_data = {
@@ -75,8 +77,19 @@ def start_alert_worker():
 
 
 # =========== MAIN TRIGGER ===========
-def trigger_alert(frame, weapon_class, conf, distance, status):
-    """Thêm frame vào hàng đợi xử lý cảnh báo (gần như tức thời)."""
+def trigger_alert(frame, weapon_class, conf, distance, status, person_box=None, weapon_box=None):
+    """
+    Thêm frame vào hàng đợi xử lý cảnh báo (gần như tức thời).
+    
+    Args:
+        frame: Frame ảnh hiện tại
+        weapon_class: Loại vũ khí được phát hiện
+        conf: Độ tin cậy của detection
+        distance: Khoảng cách đến vũ khí (nếu có)
+        status: Trạng thái nguy hiểm (ví dụ: "Có người")
+        person_box: Bounding box của người [x1, y1, x2, y2] (nếu có)
+        weapon_box: Bounding box của vũ khí [x1, y1, x2, y2] (nếu có)
+    """
     now = time.time()
     global _last_alert_time
 
@@ -93,4 +106,4 @@ def trigger_alert(frame, weapon_class, conf, distance, status):
         except queue.Empty:
             pass
 
-    alert_queue.put_nowait((frame.copy(), weapon_class, conf, distance, status))
+    alert_queue.put_nowait((frame.copy(), weapon_class, conf, distance, status, person_box, weapon_box))

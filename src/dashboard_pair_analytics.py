@@ -162,9 +162,12 @@ with tab1:
                         pcx, pcy = (px1 + px2) // 2, (py1 + py2) // 2
                         cv2.line(annotated, (wcx, wcy), (pcx, pcy), (255, 255, 0), 2)
                         status = "Held by Person"
-                        # --- Trigger alert system ---
+                        # --- Trigger alert system with bounding boxes ---
                     try:
-                        trigger_alert(frame, weapon_name, conf, min_dist / 100, status)
+                        # Chuẩn bị bounding boxes cho alert
+                        person_box = list(map(int, nearest_person)) if nearest_person else None
+                        weapon_box = [wx1, wy1, wx2, wy2]
+                        trigger_alert(frame, weapon_name, conf, min_dist / 100, status, person_box, weapon_box)
                     except Exception as e:
                         print(f"[ALERT ERROR] {e}")
                         cv2.putText(

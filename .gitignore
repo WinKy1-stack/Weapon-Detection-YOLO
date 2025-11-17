@@ -48,6 +48,36 @@ dataset/train/labels/
 dataset/val/images/
 dataset/val/labels/
 dataset/test/images/
+
+# Node.js / Frontend
+node_modules/
+.npm/
+.pnpm-store/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.next/
+.nuxt/
+dist/
+build/
+.cache/
+.parcel-cache/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env.production
+
+# Uploads & Generated Files
+uploads/
+*.jpg
+*.jpeg
+*.png
+*.gif
+!dataset/.gitkeep
+!static/logo.png
 dataset/test/labels/
 !dataset/train/.gitkeep
 !dataset/val/.gitkeep
