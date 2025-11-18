@@ -6,7 +6,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from bson import ObjectId
 
-from backend.app.core.database import get_database
+from backend.app.core.in_memory_db import in_memory_db
 from backend.app.core.security import get_current_user
 from backend.app.schemas.detection import AlertResponse
 

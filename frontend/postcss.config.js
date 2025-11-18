@@ -1,5 +1,4 @@
-#
-PostCSS configuration
+// PostCSS configuration
 export default {
     plugins: {
         tailwindcss: {},

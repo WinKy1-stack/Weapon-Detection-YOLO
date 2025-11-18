@@ -1,8 +1,7 @@
 """
 Authentication endpoints
 """
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, HTTPException, status, Form
 from datetime import timedelta
 
 from backend.app.core.config import settings
@@ -12,7 +11,7 @@ from backend.app.core.security import (
     create_access_token,
     get_current_user,
 )
-from backend.app.core.database import get_database
+from backend.app.core.in_memory_db import in_memory_db
 from backend.app.schemas.user import UserCreate, UserLogin, UserResponse, Token
 from backend.app.models.user import UserModel
 
@@ -22,10 +21,9 @@ router = APIRouter()
 @router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserCreate):
     """Register a new user"""
-    db = get_database()
     
     # Check if user already exists
-    existing_user = await db.users.find_one({"email": user_data.email})
+    existing_user = await in_memory_db.find_user_by_email(user_data.email)
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -41,8 +39,8 @@ async def register(user_data: UserCreate):
         is_admin=user_data.is_admin,
     )
     
-    result = await db.users.insert_one(user_doc)
-    user_doc["_id"] = str(result.inserted_id)
+    user_id = await in_memory_db.insert_user(user_doc)
+    user_doc["_id"] = user_id
     
     # Create access token
     access_token = create_access_token(
@@ -60,12 +58,11 @@ async def register(user_data: UserCreate):
 
 
 @router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+async def login(email: str = Form(...), password: str = Form(...)):
     """Login with email and password"""
-    db = get_database()
     
     # Find user
-    user = await db.users.find_one({"email": form_data.username})
+    user = await in_memory_db.find_user_by_email(email)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -74,7 +71,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         )
     
     # Verify password
-    if not verify_password(form_data.password, user["hashed_password"]):
+    if not verify_password(password, user["hashed_password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -107,10 +104,8 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: dict = Depends(get_current_user)):
     """Get current user info"""
-    db = get_database()
-    from bson import ObjectId
     
-    user = await db.users.find_one({"_id": ObjectId(current_user["user_id"])})
+    user = await in_memory_db.find_user_by_id(current_user["user_id"])
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

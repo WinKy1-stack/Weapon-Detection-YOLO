@@ -7,7 +7,6 @@ from fastapi.staticfiles import StaticFiles
 import os
 
 from backend.app.core.config import settings
-from backend.app.core.database import connect_to_mongo, close_mongo_connection
 from backend.app.api.router import api_router
 
 # Create FastAPI app
@@ -40,15 +39,13 @@ app.include_router(api_router, prefix=settings.API_PREFIX)
 @app.on_event("startup")
 async def startup_event():
     """Initialize connections on startup"""
-    await connect_to_mongo()
-    print(f"🚀 {settings.PROJECT_NAME} v{settings.VERSION} started")
+    print(f"🚀 {settings.PROJECT_NAME} v{settings.VERSION} started (In-Memory Mode)")
     print(f"📚 Docs available at: http://localhost:8000{settings.API_PREFIX}/docs")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close connections on shutdown"""
-    await close_mongo_connection()
     print("🛑 Application shutdown")
 
 

@@ -1,12 +1,12 @@
 """
 Configuration settings for the FastAPI backend
 """
-from pydantic_settings import BaseSettings
-from typing import Optional
+from pydantic import BaseModel
+from typing import Optional, List
 import os
 
 
-class Settings(BaseSettings):
+class Settings(BaseModel):
     # API Settings
     PROJECT_NAME: str = "Weapon Detection API"
     VERSION: str = "1.0.0"
@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     
     # CORS
-    BACKEND_CORS_ORIGINS: list = [
+    BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:3000",  # React dev server
         "http://localhost:5173",  # Vite dev server
         "http://localhost:8000",  # FastAPI server
@@ -47,10 +47,6 @@ class Settings(BaseSettings):
     # Paths
     UPLOAD_DIR: str = "uploads"
     SNAPSHOT_DIR: str = "runs/alerts_snapshots"
-    
-    class Config:
-        case_sensitive = True
-        env_file = ".env"
 
 
 settings = Settings()
