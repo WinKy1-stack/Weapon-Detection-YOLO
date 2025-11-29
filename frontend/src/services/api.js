@@ -1,4 +1,4 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 
 const API_BASE_URL =
     import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
@@ -10,7 +10,6 @@ const api = axios.create({
     },
 });
 
-// Add auth token to requests
 api.interceptors.request.use((config) => {
     const token = localStorage.getItem('token');
     if (token) {
@@ -19,11 +18,10 @@ api.interceptors.request.use((config) => {
     return config;
 });
 
-// Handle auth errors
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response ? .status === 401) {
+        if (error.response && error.response.status === 401) {
             localStorage.removeItem('token');
             localStorage.removeItem('user');
             window.location.href = '/login';
@@ -36,7 +34,7 @@ export const authAPI = {
     register: (data) => api.post('/auth/register', data),
     login: (email, password) => {
         const formData = new FormData();
-        formData.append('username', email);
+        formData.append('email', email);
         formData.append('password', password);
         return api.post('/auth/login', formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
@@ -54,6 +52,19 @@ export const detectionAPI = {
         return api.post('/detection/detect/image', formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
         });
+    },
+    detectWeaponWithPairing: async(formData) => {
+        const response = await api.post('/detection/detect/image-with-pairing', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
+    },
+    detectVideo: async(formData) => {
+        const response = await api.post('/detection/detect/video', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 300000 // 5 minutes timeout for video processing
+        });
+        return response.data;
     },
     getModels: () => api.get('/detection/models'),
 };

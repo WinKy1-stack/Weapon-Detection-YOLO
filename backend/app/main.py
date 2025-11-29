@@ -8,6 +8,7 @@ import os
 
 from backend.app.core.config import settings
 from backend.app.api.router import api_router
+from backend.app.services.stream_manager import stream_manager
 
 # Create FastAPI app
 app = FastAPI(
@@ -28,7 +29,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files
+# Create upload directories
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+os.makedirs(os.path.join(settings.UPLOAD_DIR, "videos"), exist_ok=True)
+os.makedirs(os.path.join(settings.UPLOAD_DIR, "results"), exist_ok=True)
+
+# Mount static files for video results
+uploads_results_dir = os.path.join(settings.UPLOAD_DIR, "results")
+app.mount("/static/results", StaticFiles(directory=uploads_results_dir), name="results")
+
+# Mount uploads directory
+if os.path.exists(settings.UPLOAD_DIR):
+    app.mount("/static/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+
+# Mount snapshots directory
 if os.path.exists(settings.SNAPSHOT_DIR):
     app.mount("/snapshots", StaticFiles(directory=settings.SNAPSHOT_DIR), name="snapshots")
 
@@ -39,13 +53,33 @@ app.include_router(api_router, prefix=settings.API_PREFIX)
 @app.on_event("startup")
 async def startup_event():
     """Initialize connections on startup"""
-    print(f"🚀 {settings.PROJECT_NAME} v{settings.VERSION} started (In-Memory Mode)")
+    from backend.app.core.database import connect_to_mongo
+    from backend.app.services.detection_service import DetectionService
+    
+    print(f"🚀 {settings.PROJECT_NAME} v{settings.VERSION} started")
     print(f"📚 Docs available at: http://localhost:8000{settings.API_PREFIX}/docs")
+    print(f"📹 Camera streaming ready")
+    print(f"📁 Static files mounted at /static/results and /static/uploads")
+    
+    # Connect to MongoDB
+    await connect_to_mongo()
+    
+    # Preload YOLO model
+    try:
+        detection_service = DetectionService()
+        detection_service.load_yolo_model()
+        print(f"✅ Loaded YOLO model from {settings.YOLO_MODEL_PATH}")
+    except Exception as e:
+        print(f"⚠️ Failed to preload YOLO model: {e}")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close connections on shutdown"""
+    from backend.app.core.database import close_mongo_connection
+    print("🛑 Stopping all camera streams...")
+    stream_manager.stop_all()
+    await close_mongo_connection()
     print("🛑 Application shutdown")
 
 
@@ -64,7 +98,8 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "version": settings.VERSION
+        "version": settings.VERSION,
+        "active_cameras": stream_manager.get_active_count()
     }
 
 

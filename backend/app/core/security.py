@@ -4,23 +4,26 @@ Security utilities: JWT tokens, password hashing
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from .config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_PREFIX}/auth/login")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against a hash"""
-    return pwd_context.verify(plain_password, hashed_password)
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 
 def get_password_hash(password: str) -> str:
     """Hash a password"""
-    return pwd_context.hash(password)
+    # Bcrypt has a maximum password length of 72 bytes
+    password = password[:72]
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -59,3 +62,18 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
             detail="Could not validate credentials",
         )
     return {"user_id": user_id, "email": payload.get("email")}
+
+
+async def get_current_user_ws(token: Optional[str]) -> dict:
+    """Get current user from JWT token for WebSocket (optional auth)"""
+    if not token:
+        return {"user_id": "anonymous", "email": "anonymous@example.com"}
+    
+    try:
+        payload = decode_access_token(token)
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            return {"user_id": "anonymous", "email": "anonymous@example.com"}
+        return {"user_id": user_id, "email": payload.get("email")}
+    except:
+        return {"user_id": "anonymous", "email": "anonymous@example.com"}

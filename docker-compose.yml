@@ -1,77 +1,40 @@
 version: '3.8'
 
 services:
-  # MongoDB Database
-  mongodb:
-    image: mongo:7.0
-    container_name: weapon-detection-mongo
-    restart: unless-stopped
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongodb_data:/data/db
-    environment:
-      - MONGO_INITDB_DATABASE=weapon_detection
-    networks:
-      - weapon-detection-network
-
-  # Redis Cache
-  redis:
-    image: redis:7-alpine
-    container_name: weapon-detection-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    networks:
-      - weapon-detection-network
-
-  # FastAPI Backend
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: weapon-detection-backend
-    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app
       - ./runs:/app/runs
-      - ./dataset:/app/dataset
       - ./uploads:/app/uploads
     environment:
-      - MONGODB_URL=mongodb://mongodb:27017
-      - MONGODB_DB_NAME=weapon_detection
-      - REDIS_URL=redis://redis:6379
-      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
-    depends_on:
-      - mongodb
-      - redis
+      - PYTHONUNBUFFERED=1
     networks:
-      - weapon-detection-network
+      - weapon-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # React Frontend
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: weapon-detection-frontend
-    restart: unless-stopped
     ports:
       - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     environment:
       - VITE_API_URL=http://localhost:8000/api/v1
     depends_on:
       - backend
     networks:
-      - weapon-detection-network
-
-volumes:
-  mongodb_data:
+      - weapon-net
 
 networks:
-  weapon-detection-network:
+  weapon-net:
     driver: bridge

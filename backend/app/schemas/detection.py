@@ -40,6 +40,25 @@ class AlertCreate(BaseModel):
     image_path: str
 
 
+class PersonWeaponPair(BaseModel):
+    """Person-weapon pairing information"""
+    weapon: Detection
+    person_bbox: Optional[BoundingBox] = None
+    distance: Optional[float] = None
+    status: str  # "held_by_person" or "no_owner"
+    danger_level: str  # "high", "medium", "low"
+
+
+class PairingDetectionResponse(BaseModel):
+    """Response with person-weapon pairing"""
+    pairs: List[PersonWeaponPair]
+    processing_time: float
+    image_url: Optional[str] = None
+    model_used: str
+    total_weapons: int
+    weapons_with_persons: int
+
+
 class AlertResponse(BaseModel):
     id: str = Field(alias="_id")
     timestamp: datetime

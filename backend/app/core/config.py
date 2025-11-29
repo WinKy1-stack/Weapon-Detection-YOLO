@@ -20,6 +20,7 @@ class Settings(BaseModel):
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:3000",  # React dev server
+        "http://localhost:3001",  # Vite dev server (alternate port)
         "http://localhost:5173",  # Vite dev server
         "http://localhost:8000",  # FastAPI server
     ]

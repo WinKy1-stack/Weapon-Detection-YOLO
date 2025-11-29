@@ -15,13 +15,18 @@ class InMemoryDB:
         user_id = str(uuid.uuid4())
         user_data["_id"] = user_id
         self.users[user_id] = user_data
+        print(f"✅ User registered: {user_data.get('email')} with ID: {user_id}")
+        print(f"📊 Total users in DB: {len(self.users)}")
         return user_id
     
     async def find_user_by_email(self, email: str) -> Optional[dict]:
         """Find user by email"""
+        print(f"🔍 Searching for user with email: {email}")
         for user in self.users.values():
             if user.get("email") == email:
+                print(f"✅ Found user: {user.get('full_name', 'Unknown')}")
                 return user
+        print(f"❌ User not found")
         return None
     
     async def find_user_by_id(self, user_id: str) -> Optional[dict]:
@@ -81,3 +86,56 @@ class InMemoryDB:
 
 # Singleton instance
 in_memory_db = InMemoryDB()
+
+# Add some dummy data for testing
+async def init_dummy_data():
+    """Initialize dummy alerts for testing"""
+    from datetime import timedelta
+    
+    dummy_alerts = [
+        {
+            "weapon_class": "firearm",
+            "confidence": 0.95,
+            "danger_level": "high",
+            "person_held": True,
+            "timestamp": datetime.utcnow() - timedelta(hours=2),
+            "location": "Camera 1",
+        },
+        {
+            "weapon_class": "knife",
+            "confidence": 0.87,
+            "danger_level": "medium",
+            "person_held": True,
+            "timestamp": datetime.utcnow() - timedelta(hours=5),
+            "location": "Camera 2",
+        },
+        {
+            "weapon_class": "firearm",
+            "confidence": 0.92,
+            "danger_level": "high",
+            "person_held": False,
+            "timestamp": datetime.utcnow() - timedelta(days=1),
+            "location": "Camera 3",
+        },
+        {
+            "weapon_class": "other",
+            "confidence": 0.75,
+            "danger_level": "low",
+            "person_held": False,
+            "timestamp": datetime.utcnow() - timedelta(days=2),
+            "location": "Camera 1",
+        },
+        {
+            "weapon_class": "knife",
+            "confidence": 0.88,
+            "danger_level": "medium",
+            "person_held": True,
+            "timestamp": datetime.utcnow() - timedelta(days=3),
+            "location": "Camera 2",
+        },
+    ]
+    
+    for alert in dummy_alerts:
+        await in_memory_db.insert_alert(alert)
+    
+    print(f"✅ Initialized {len(dummy_alerts)} dummy alerts")
