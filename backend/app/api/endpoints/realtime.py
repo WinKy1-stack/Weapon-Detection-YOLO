@@ -11,16 +11,25 @@ import time
 import threading
 from typing import Optional
 import asyncio
+from datetime import datetime
+from pathlib import Path
 
-from backend.app.core.security import get_current_user_ws
-from backend.app.services.detection_service import detection_service
+from app.core.security import get_current_user_ws
+from app.services.detection_service import detection_service
+from app.services.alert_service import telegram_alert
+from app.services.person_weapon_analyzer import person_weapon_analyzer
+from app.core.database import get_database
 
 router = APIRouter()
+
+# Snapshot directory
+SNAPSHOT_DIR = Path("runs/alerts_snapshots")
+SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # === ALERT COOLDOWN TRACKING ===
 alert_cooldowns = {}  # {client_id: last_alert_timestamp}
-ALERT_COOLDOWN_SECONDS = 10  # Minimum 10 seconds between alerts
+ALERT_COOLDOWN_SECONDS = 0  # 0 = No cooldown, send EVERY detection
 
 
 def can_send_alert(client_id: str) -> bool:
@@ -54,30 +63,131 @@ def send_alert_background(client_id: str, frame: np.ndarray, detections: list):
         detections: List of weapon detections
     """
     try:
-        # === ADD YOUR ALERT LOGIC HERE ===
-        # Example: Send to Telegram, Discord, Email, etc.
+        # === DETECT PERSONS IN FRAME ===
+        person_detections = person_weapon_analyzer.detect_persons(frame, conf_threshold=0.5)
+        person_count = len(person_detections)
         
-        # Build alert message
+        # === ANALYZE WEAPON-PERSON RELATIONSHIP ===
+        weapon_dicts = []
+        for det in detections:
+            weapon_dicts.append({
+                'label': det.class_name,
+                'confidence': det.confidence,
+                'bbox': [int(det.bbox.x1), int(det.bbox.y1), int(det.bbox.x2), int(det.bbox.y2)]
+            })
+        
+        analyzed_weapons = person_weapon_analyzer.analyze_weapon_person_relationship(
+            weapon_dicts, 
+            person_detections
+        )
+        
+        # === DETERMINE OVERALL THREAT ===
+        danger_level, message = person_weapon_analyzer.determine_overall_threat(
+            analyzed_weapons,
+            person_count
+        )
+        
         weapon_count = len(detections)
-        weapon_names = [det.class_name for det in detections]
-        message = f"🚨 WEAPON DETECTED!\n\n"
-        message += f"Client: {client_id}\n"
-        message += f"Weapons: {weapon_count}\n"
-        message += f"Types: {', '.join(set(weapon_names))}\n"
+        print(f"🔍 Analysis: {person_count} person(s), {weapon_count} weapon(s) - Status: {message}")
         
-        # EXAMPLE: Telegram alert (uncomment when ready)
-        # from backend.app.services.telegram_service import telegram_alert
-        # telegram_alert.send_alert(
-        #     camera_id=client_id,
-        #     image=frame,
-        #     message=message,
-        #     detections=detections
-        # )
+        # === SAVE SNAPSHOT IMAGE ===
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        snapshot_filename = f"alert_{client_id}_{timestamp}.jpg"
+        snapshot_path = SNAPSHOT_DIR / snapshot_filename
         
-        print(f"✅ Alert sent (background): {client_id} - {weapon_count} weapons")
+        # Draw detections on frame for snapshot
+        annotated_frame = frame.copy()
+        
+        # Draw persons in green
+        for person in person_detections:
+            px1, py1, px2, py2 = person['bbox']
+            cv2.rectangle(annotated_frame, (px1, py1), (px2, py2), (0, 255, 0), 2)
+            cv2.putText(annotated_frame, f"Person {person['confidence']:.2f}", 
+                       (px1, py1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        # Draw weapons in red with status
+        for i, det in enumerate(detections):
+            x1, y1 = int(det.bbox.x1), int(det.bbox.y1)
+            x2, y2 = int(det.bbox.x2), int(det.bbox.y2)
+            
+            # Draw bounding box
+            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            
+            # Get status from analyzed weapons
+            status = analyzed_weapons[i].get('status', 'unknown') if i < len(analyzed_weapons) else 'unknown'
+            status_text = person_weapon_analyzer.get_status_vietnamese(status)
+            
+            # Draw label with status
+            label = f"{det.class_name} {det.confidence:.2f}"
+            cv2.putText(annotated_frame, label, (x1, y1 - 25),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            cv2.putText(annotated_frame, status_text, (x1, y1 - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+        
+        # Save snapshot
+        cv2.imwrite(str(snapshot_path), annotated_frame)
+        print(f"📸 Snapshot saved: {snapshot_filename}")
+        
+        # === SAVE TO MONGODB (sync client for threading) ===
+        try:
+            from pymongo import MongoClient
+            from app.core.config import settings
+            
+            # Use sync MongoDB client in thread
+            sync_client = MongoClient(settings.MONGODB_URL)
+            sync_db = sync_client[settings.MONGODB_DB_NAME]
+            
+            # Get highest confidence detection
+            max_confidence = max(det.confidence for det in detections)
+            primary_weapon = max(detections, key=lambda d: d.confidence).class_name
+            weapon_types = list(set([det.class_name for det in detections]))
+            
+            # Get weapon statuses from analysis
+            weapon_statuses = [w.get('status', 'unknown') for w in analyzed_weapons]
+            held_count = sum(1 for s in weapon_statuses if s == 'held_by_person')
+            
+            alert_data = {
+                "weapon_class": primary_weapon,
+                "confidence": float(max_confidence),
+                "total_weapons": weapon_count,
+                "all_weapons": weapon_types,
+                "status": message,  # Use analyzed status message
+                "danger_level": danger_level,  # Use analyzed danger level
+                "location": "Realtime Detection",
+                "camera_id": client_id,
+                "image_path": f"/snapshots/{snapshot_filename}",
+                "timestamp": datetime.utcnow(),
+                "acknowledged": False,
+                "person_count": person_count,
+                "held_by_person": held_count > 0,
+                "weapon_statuses": weapon_statuses
+            }
+            
+            result = sync_db.alerts.insert_one(alert_data)
+            sync_client.close()
+            
+            print(f"💾 Alert saved to MongoDB: {result.inserted_id}")
+            
+        except Exception as db_error:
+            print(f"⚠️ MongoDB save failed: {db_error}")
+            # Continue even if DB save fails
+        
+        # === TELEGRAM ALERT ===
+        # Send EVERY detection immediately (skip cooldown)
+        telegram_alert.send_alert(
+            camera_id=client_id,
+            image=annotated_frame,  # Send annotated frame
+            message=message,
+            detections=detections,
+            skip_cooldown=True  # Always send, no cooldown
+        )
+        
+        print(f"✅ Alert triggered: {client_id} - {weapon_count} weapons - Danger: {danger_level}")
         
     except Exception as e:
         print(f"❌ Alert failed (background): {e}")
+        import traceback
+        traceback.print_exc()
         # Don't propagate error to main WebSocket loop
 
 
@@ -104,12 +214,14 @@ async def websocket_realtime_detect(
     websocket: WebSocket,
     token: Optional[str] = Query(None),
     confidence: float = Query(0.5),
-    model_type: str = Query("yolo")
+    model_type: str = Query("yolo"),
+    roi: Optional[str] = Query(None)  # NEW: ROI parameter "x,y,w,h"
 ):
     """
     WebSocket endpoint for realtime detection
     
     OPTIMIZED: Non-blocking with threading for alerts
+    NEW: ROI (Region of Interest) filtering support
     
     Client sends: base64 encoded frame
     Server sends: {
@@ -117,11 +229,26 @@ async def websocket_realtime_detect(
         "processing_time": float,
         "total_weapons": int
     }
+    
+    Args:
+        roi: Optional ROI string in format "x,y,w,h" (e.g. "100,150,400,300")
     """
     await manager.connect(websocket)
     
     # Generate unique client ID
     client_id = f"ws_{id(websocket)}_{int(time.time())}"
+    
+    # Parse ROI parameter
+    roi_box = None
+    if roi:
+        try:
+            parts = [int(p.strip()) for p in roi.split(',')]
+            if len(parts) == 4:
+                roi_box = parts  # [x, y, w, h]
+                print(f"🎯 ROI enabled for {client_id}: {roi_box}")
+        except Exception as e:
+            print(f"⚠️ Invalid ROI format: {roi} - {e}")
+            roi_box = None
     
     # Validate token (optional for demo, but recommended)
     # user = await get_current_user_ws(token)
@@ -191,19 +318,57 @@ async def websocket_realtime_detect(
                     })
                     continue
                 
+                # === ROI FILTERING ===
+                original_count = len(detections)
+                if roi_box and original_count > 0:
+                    # Import weapon_detector for ROI filtering
+                    from app.services.weapon_detector import weapon_detector
+                    
+                    # Convert detections to format expected by weapon_detector
+                    det_dicts = [
+                        {
+                            "label": det.class_name,
+                            "confidence": det.confidence,
+                            "bbox": [det.bbox.x1, det.bbox.y1, det.bbox.x2, det.bbox.y2],
+                            "class_id": 0
+                        }
+                        for det in detections
+                    ]
+                    
+                    # Filter by ROI
+                    filtered_dicts = weapon_detector.filter_by_roi(det_dicts, roi_box)
+                    
+                    # Convert back to Detection objects
+                    from app.schemas.detection import Detection, BoundingBox
+                    detections = [
+                        Detection(
+                            class_name=d["label"],
+                            confidence=d["confidence"],
+                            bbox=BoundingBox(
+                                x1=d["bbox"][0],
+                                y1=d["bbox"][1],
+                                x2=d["bbox"][2],
+                                y2=d["bbox"][3]
+                            )
+                        )
+                        for d in filtered_dicts
+                    ]
+                    
+                    filtered_count = len(detections)
+                    if original_count > filtered_count:
+                        print(f"🎯 ROI Filter: {original_count} → {filtered_count} detections ({original_count - filtered_count} outside ROI)")
+                
                 processing_time = time.time() - start_time
                 
-                # === NON-BLOCKING ALERT LOGIC (FUTURE) ===
-                # ⚠️ CRITICAL: If you add alert logic, use threading:
-                #
-                # if len(detections) > 0 and can_send_alert(client_id):
-                #     threading.Thread(
-                #         target=send_alert_background,
-                #         args=(client_id, frame.copy(), detections),
-                #         daemon=True
-                #     ).start()
-                #
-                # This ensures alerts don't block WebSocket response
+                # === NON-BLOCKING ALERT LOGIC ===
+                # Send EVERY detection (no cooldown check)
+                if len(detections) > 0:
+                    # Always send alerts, regardless of danger level or cooldown
+                    threading.Thread(
+                        target=send_alert_background,
+                        args=(client_id, frame.copy(), detections),
+                        daemon=True
+                    ).start()
                 
                 # Calculate FPS
                 frame_count += 1

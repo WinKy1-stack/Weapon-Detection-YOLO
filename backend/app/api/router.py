@@ -2,7 +2,7 @@
 API Router - combines all endpoint routers
 """
 from fastapi import APIRouter
-from backend.app.api.endpoints import auth, detection, alerts, realtime
+from app.api.endpoints import auth, detection, alerts, realtime
 
 api_router = APIRouter()
 

@@ -6,9 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 
-from backend.app.core.config import settings
-from backend.app.api.router import api_router
-from backend.app.services.stream_manager import stream_manager
+from app.core.config import settings
+from app.api.router import api_router
+from app.services.stream_manager import stream_manager
 
 # Create FastAPI app
 app = FastAPI(
@@ -53,8 +53,8 @@ app.include_router(api_router, prefix=settings.API_PREFIX)
 @app.on_event("startup")
 async def startup_event():
     """Initialize connections on startup"""
-    from backend.app.core.database import connect_to_mongo
-    from backend.app.services.detection_service import DetectionService
+    from app.core.database import connect_to_mongo
+    from app.services.detection_service import DetectionService
     
     print(f"🚀 {settings.PROJECT_NAME} v{settings.VERSION} started")
     print(f"📚 Docs available at: http://localhost:8000{settings.API_PREFIX}/docs")
@@ -76,7 +76,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close connections on shutdown"""
-    from backend.app.core.database import close_mongo_connection
+    from app.core.database import close_mongo_connection
     print("🛑 Stopping all camera streams...")
     stream_manager.stop_all()
     await close_mongo_connection()

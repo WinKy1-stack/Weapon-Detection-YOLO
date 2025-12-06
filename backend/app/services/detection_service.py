@@ -15,8 +15,8 @@ import sys
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
 sys.path.insert(0, project_root)
 
-from backend.app.core.config import settings
-from backend.app.schemas.detection import Detection, BoundingBox, PersonWeaponPair
+from app.core.config import settings
+from app.schemas.detection import Detection, BoundingBox, PersonWeaponPair
 
 
 class DetectionService:
@@ -75,8 +75,25 @@ class DetectionService:
         """
         model = self.load_yolo_model()
         
+        # OPTIMIZATION: Resize large images for faster inference
+        original_h, original_w = image.shape[:2]
+        max_size = 640  # YOLO input size
+        
+        if original_w > max_size or original_h > max_size:
+            # Resize maintaining aspect ratio
+            scale = max_size / max(original_w, original_h)
+            new_w = int(original_w * scale)
+            new_h = int(original_h * scale)
+            resized_image = cv2.resize(image, (new_w, new_h))
+            scale_back_x = original_w / new_w
+            scale_back_y = original_h / new_h
+        else:
+            resized_image = image
+            scale_back_x = 1.0
+            scale_back_y = 1.0
+        
         start_time = time.time()
-        results = model(image, conf=conf_threshold, verbose=False)
+        results = model(resized_image, conf=conf_threshold, verbose=False, imgsz=640)
         processing_time = time.time() - start_time
         
         detections = []
@@ -88,10 +105,16 @@ class DetectionService:
                 cls = int(box.cls)
                 class_name = result.names[cls]
                 
+                # Scale coordinates back to original image size
                 detections.append(Detection(
                     class_name=class_name,
                     confidence=conf,
-                    bbox=BoundingBox(x1=float(x1), y1=float(y1), x2=float(x2), y2=float(y2))
+                    bbox=BoundingBox(
+                        x1=float(x1 * scale_back_x), 
+                        y1=float(y1 * scale_back_y), 
+                        x2=float(x2 * scale_back_x), 
+                        y2=float(y2 * scale_back_y)
+                    )
                 ))
         
         return detections, processing_time

@@ -23,8 +23,12 @@ export default function Dashboard() {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const statsData = await alertsAPI.getAlertStats();
+      const statsResponse = await alertsAPI.getAlertStats();
       const alertsResponse = await alertsAPI.getAlerts({ limit: 5 });
+      
+      // Extract data from axios response
+      const statsData = statsResponse.data || statsResponse;
+      const alertsData = alertsResponse.data || alertsResponse;
       
       setStats({
         total_alerts: statsData.total_alerts || 0,
@@ -34,7 +38,7 @@ export default function Dashboard() {
         today_alerts: statsData.today_alerts || 0,
       });
       
-      setRecentAlerts(alertsResponse.alerts || []);
+      setRecentAlerts(alertsData.alerts || []);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       toast.error('Không thể tải dữ liệu dashboard');

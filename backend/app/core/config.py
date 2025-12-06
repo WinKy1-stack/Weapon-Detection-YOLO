@@ -4,7 +4,10 @@ Configuration settings for the FastAPI backend
 from pydantic import BaseModel
 from typing import Optional, List
 import os
+from dotenv import load_dotenv
 
+# Load .env file from backend directory
+load_dotenv()
 
 class Settings(BaseModel):
     # API Settings

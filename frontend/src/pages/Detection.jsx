@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Upload, Camera, Video, AlertTriangle, X, Loader2, Image as ImageIcon, Wifi, WifiOff, Play, Square } from 'lucide-react';
+import { Upload, Camera, Video, AlertTriangle, X, Loader2, Image as ImageIcon, Wifi, WifiOff, Play, Square, Edit3, Trash2 } from 'lucide-react';
 import { detectionAPI } from '../services/api';
 import toast from 'react-hot-toast';
 
@@ -25,6 +25,12 @@ export default function Detection() {
     withPerson: 0,
     fps: 0
   });
+  
+  // ROI (Region of Interest / Danger Zone) states
+  const [roi, setRoi] = useState(null); // { x, y, w, h }
+  const [isDrawingROI, setIsDrawingROI] = useState(false);
+  const [roiStart, setRoiStart] = useState(null);
+  const [tempRoi, setTempRoi] = useState(null);
   
   const fileInputRef = useRef(null);
   const videoInputRef = useRef(null);
@@ -180,9 +186,25 @@ export default function Detection() {
         // Always draw the fresh video frame first
         ctx.drawImage(videoSource, 0, 0, canvas.width, canvas.height);
         
+        // Draw ROI zone (cyan rectangle)
+        if (roi && !isDrawingROI) {
+          drawROI(ctx, roi, 'permanent');
+        }
+        
+        // Draw temporary ROI while drawing
+        if (tempRoi && isDrawingROI) {
+          drawROI(ctx, tempRoi, 'temporary');
+        }
+        
         // Draw detection boxes on top if we have data
+        // Keep showing bbox for 500ms even if new data not arrived yet (smooth display)
         if (detectionDataRef.current && detectionDataRef.current.detections) {
-          drawDetections(ctx, detectionDataRef.current.detections, canvas.width, canvas.height);
+          const age = Date.now() - (detectionDataRef.current.timestamp || 0);
+          
+          // Only draw if detection is fresh (< 500ms old)
+          if (age < 500) {
+            drawDetections(ctx, detectionDataRef.current.detections, canvas.width, canvas.height);
+          }
         }
       }
       
@@ -193,29 +215,177 @@ export default function Detection() {
   };
 
   const drawDetections = (ctx, detections, canvasWidth, canvasHeight) => {
+    // Backend sends bbox in actual frame coordinates
+    // Canvas may be different size, so we need to scale
+    // But if we can't get video element, assume 1:1 (bbox already in canvas coords)
+    
+    let scaleX = 1.0;
+    let scaleY = 1.0;
+    
+    const videoElement = videoRef.current;
+    if (videoElement && videoElement.videoWidth && videoElement.videoHeight) {
+      // Scale from video native resolution to canvas display size
+      scaleX = canvasWidth / videoElement.videoWidth;
+      scaleY = canvasHeight / videoElement.videoHeight;
+      
+      // Debug log
+      if (detections.length > 0) {
+        console.log(`Drawing ${detections.length} detections. Video: ${videoElement.videoWidth}x${videoElement.videoHeight}, Canvas: ${canvasWidth}x${canvasHeight}, Scale: ${scaleX.toFixed(2)}x${scaleY.toFixed(2)}`);
+      }
+    } else {
+      // Fallback: assume bbox is already in canvas coordinates
+      console.log(`Drawing ${detections.length} detections without video element (using 1:1 scale)`);
+    }
+    
     detections.forEach(det => {
       const { x1, y1, x2, y2 } = det.bbox;
-      const width = x2 - x1;
-      const height = y2 - y1;
       
-      // Draw red bounding box
-      ctx.strokeStyle = '#ff0000';
+      // Scale bbox coordinates from video size to canvas size
+      const scaledX1 = x1 * scaleX;
+      const scaledY1 = y1 * scaleY;
+      const scaledX2 = x2 * scaleX;
+      const scaledY2 = y2 * scaleY;
+      const width = scaledX2 - scaledX1;
+      const height = scaledY2 - scaledY1;
+      
+      // Check if detection is inside ROI (use scaled coordinates)
+      const inROI = roi ? isInsideROI({ x1: scaledX1, y1: scaledY1, x2: scaledX2, y2: scaledY2 }, roi) : false;
+      
+      // Color: RED if in ROI, YELLOW if outside
+      const color = inROI ? '#FF0000' : '#FFFF00';
+      
+      // Draw bounding box
+      ctx.strokeStyle = color;
       ctx.lineWidth = 3;
-      ctx.strokeRect(x1, y1, width, height);
+      ctx.strokeRect(scaledX1, scaledY1, width, height);
       
-      // Draw label background
-      const label = `${det.class_name} ${(det.confidence * 100).toFixed(0)}%`;
+      // Draw label background (use scaled coordinates)
+      const label = `${det.class_name} ${(det.confidence * 100).toFixed(0)}%${inROI ? ' [IN ZONE]' : ''}`;
       ctx.font = 'bold 16px Arial';
       const textMetrics = ctx.measureText(label);
       const textHeight = 20;
       
-      ctx.fillStyle = '#ff0000';
-      ctx.fillRect(x1, y1 - textHeight - 5, textMetrics.width + 10, textHeight + 5);
+      ctx.fillStyle = color;
+      ctx.fillRect(scaledX1, scaledY1 - textHeight - 5, textMetrics.width + 10, textHeight + 5);
       
       // Draw label text
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(label, x1 + 5, y1 - 8);
+      ctx.fillStyle = '#000000';
+      ctx.fillText(label, scaledX1 + 5, scaledY1 - 8);
     });
+  };
+
+  const drawROI = (ctx, roiRect, type) => {
+    const { x, y, w, h } = roiRect;
+    
+    // Draw cyan semi-transparent fill
+    ctx.fillStyle = type === 'temporary' ? 'rgba(0, 255, 255, 0.15)' : 'rgba(0, 255, 255, 0.2)';
+    ctx.fillRect(x, y, w, h);
+    
+    // Draw cyan border
+    ctx.strokeStyle = '#00FFFF';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x, y, w, h);
+    
+    // Draw corner markers
+    const markerSize = 10;
+    ctx.fillStyle = '#00FFFF';
+    const corners = [
+      [x, y], [x + w, y], [x, y + h], [x + w, y + h]
+    ];
+    corners.forEach(([cx, cy]) => {
+      ctx.fillRect(cx - markerSize/2, cy - markerSize/2, markerSize, markerSize);
+    });
+    
+    // Draw label
+    if (type === 'permanent') {
+      ctx.font = 'bold 16px Arial';
+      ctx.fillStyle = '#00FFFF';
+      ctx.fillText('🚨 DANGER ZONE', x + 5, y - 10);
+      
+      // Draw size info
+      ctx.font = '12px Arial';
+      ctx.fillText(`${w}×${h}px`, x + 5, y + h + 15);
+    }
+  };
+
+  const isInsideROI = (bbox, roiRect) => {
+    const { x1, y1, x2, y2 } = bbox;
+    const { x: rx, y: ry, w: rw, h: rh } = roiRect;
+    
+    // Check if detection center is inside ROI
+    const centerX = (x1 + x2) / 2;
+    const centerY = (y1 + y2) / 2;
+    
+    return centerX >= rx && centerX <= rx + rw && centerY >= ry && centerY <= ry + rh;
+  };
+
+  // ROI Drawing Handlers
+  const handleCanvasMouseDown = (e) => {
+    if (!isDrawingROI) return;
+    
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    
+    const x = Math.round((e.clientX - rect.left) * (canvas.width / rect.width));
+    const y = Math.round((e.clientY - rect.top) * (canvas.height / rect.height));
+    
+    setRoiStart({ x, y });
+    setTempRoi({ x, y, w: 0, h: 0 });
+  };
+
+  const handleCanvasMouseMove = (e) => {
+    if (!isDrawingROI || !roiStart) return;
+    
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    
+    const currentX = Math.round((e.clientX - rect.left) * (canvas.width / rect.width));
+    const currentY = Math.round((e.clientY - rect.top) * (canvas.height / rect.height));
+    
+    const w = currentX - roiStart.x;
+    const h = currentY - roiStart.y;
+    
+    setTempRoi({
+      x: w > 0 ? roiStart.x : currentX,
+      y: h > 0 ? roiStart.y : currentY,
+      w: Math.abs(w),
+      h: Math.abs(h)
+    });
+  };
+
+  const handleCanvasMouseUp = () => {
+    if (!isDrawingROI || !tempRoi) return;
+    
+    if (tempRoi.w < 30 || tempRoi.h < 30) {
+      toast.error('Vùng quá nhỏ! Vẽ lại với kích thước lớn hơn.');
+      setTempRoi(null);
+      setRoiStart(null);
+      return;
+    }
+    
+    setRoi(tempRoi);
+    setTempRoi(null);
+    setRoiStart(null);
+    setIsDrawingROI(false);
+    
+    toast.success(`✅ Vùng cấm đã được thiết lập: ${tempRoi.w}×${tempRoi.h}px`);
+  };
+
+  const startROIDrawing = () => {
+    if (isStreaming) {
+      toast.error('Dừng stream trước khi vẽ vùng cấm');
+      return;
+    }
+    setIsDrawingROI(true);
+    toast.info('👆 Click và kéo để vẽ vùng cấm (DANGER ZONE)');
+  };
+
+  const clearROI = () => {
+    setRoi(null);
+    setTempRoi(null);
+    setRoiStart(null);
+    setIsDrawingROI(false);
+    toast.success('Vùng cấm đã xóa');
   };
 
   const startStreaming = async () => {
@@ -245,9 +415,18 @@ export default function Detection() {
       }
     }
     
-    // Connect WebSocket
+    // Connect WebSocket with ROI parameter
     const token = localStorage.getItem('token');
-    const wsConnection = new WebSocket(`${BASE_WS_URL}/api/v1/realtime/ws/realtime-detect?token=${token}&confidence=0.5&model_type=yolo`);
+    let wsUrl = `${BASE_WS_URL}/api/v1/realtime/ws/realtime-detect?token=${token}&confidence=0.5&model_type=yolo`;
+    
+    // Add ROI parameter if set
+    if (roi) {
+      wsUrl += `&roi=${roi.x},${roi.y},${roi.w},${roi.h}`;
+      console.log('🎯 ROI enabled:', roi);
+      toast.info(`🎯 Chỉ cảnh báo trong vùng: ${roi.w}×${roi.h}px`);
+    }
+    
+    const wsConnection = new WebSocket(wsUrl);
     
     wsConnection.onopen = () => {
       console.log('WebSocket connected');
@@ -283,8 +462,11 @@ export default function Detection() {
           fps: data.processing_time ? (1 / data.processing_time).toFixed(1) : 0
         });
         
-        // Store detection data for rendering
-        detectionDataRef.current = data;
+        // Store detection data for rendering with timestamp
+        detectionDataRef.current = {
+          ...data,
+          timestamp: Date.now()  // Add timestamp for smooth interpolation
+        };
         
         // Ping-Pong: Mark as done processing, allow next frame
         isProcessingRef.current = false;
@@ -358,8 +540,8 @@ export default function Detection() {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(videoSource, 0, 0, canvas.width, canvas.height);
       
-      // Lower quality to 0.7 for faster transfer
-      const frameData = canvas.toDataURL('image/jpeg', 0.7);
+      // Lower quality to 0.5 for faster transfer (bbox responsiveness > image quality)
+      const frameData = canvas.toDataURL('image/jpeg', 0.5);
       
       wsConnection.send(JSON.stringify({ frame: frameData }));
       
@@ -632,6 +814,10 @@ export default function Detection() {
               <canvas
                 ref={canvasRef}
                 className="max-w-full max-h-full object-contain"
+                style={{ cursor: isDrawingROI ? 'crosshair' : 'default' }}
+                onMouseDown={handleCanvasMouseDown}
+                onMouseMove={handleCanvasMouseMove}
+                onMouseUp={handleCanvasMouseUp}
               />
               
               {!streamRef.current && (
@@ -643,6 +829,46 @@ export default function Detection() {
                 </div>
               )}
             </div>
+
+            {/* ROI Controls */}
+            <div className="mt-4 flex gap-2">
+              {!isDrawingROI ? (
+                <>
+                  <button
+                    onClick={startROIDrawing}
+                    disabled={isStreaming}
+                    className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                    {roi ? 'Chỉnh sửa vùng cấm' : 'Vẽ vùng cấm'}
+                  </button>
+                  {roi && (
+                    <button
+                      onClick={clearROI}
+                      disabled={isStreaming}
+                      className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Xóa vùng
+                    </button>
+                  )}
+                </>
+              ) : (
+                <div className="flex-1 bg-cyan-500/10 border border-cyan-500/30 rounded-lg px-4 py-2 text-cyan-400 text-sm">
+                  👆 Click và kéo trên video để vẽ vùng cấm (DANGER ZONE)
+                </div>
+              )}
+            </div>
+
+            {/* ROI Info */}
+            {roi && !isDrawingROI && (
+              <div className="mt-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-cyan-400 font-semibold">🎯 Vùng cấm đã thiết lập</span>
+                  <span className="text-cyan-300">{roi.w}×{roi.h}px tại ({roi.x}, {roi.y})</span>
+                </div>
+              </div>
+            )}
 
             <div className="mt-4 flex gap-3">
               {!isStreaming ? (
@@ -766,7 +992,13 @@ export default function Detection() {
                   <canvas
                     ref={canvasRef}
                     className="w-full h-auto max-h-[480px] object-contain"
-                    style={{ display: isStreaming ? 'block' : 'none' }}
+                    style={{ 
+                      display: isStreaming ? 'block' : 'none',
+                      cursor: isDrawingROI ? 'crosshair' : 'default'
+                    }}
+                    onMouseDown={handleCanvasMouseDown}
+                    onMouseMove={handleCanvasMouseMove}
+                    onMouseUp={handleCanvasMouseUp}
                   />
                   
                   {/* Reset button */}
@@ -793,27 +1025,69 @@ export default function Detection() {
               </div>
             )}
 
-            {/* Control Buttons */}
+            {/* ROI Controls for Video */}
             {videoPreview && (
-              <div className="flex gap-3">
-                {!isStreaming ? (
-                  <button
-                    onClick={startStreaming}
-                    className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2"
-                  >
-                    <Play className="w-5 h-5" />
-                    Bắt đầu phát hiện
-                  </button>
-                ) : (
-                  <button
-                    onClick={stopStreaming}
-                    className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2"
-                  >
-                    <Square className="w-5 h-5" />
-                    Dừng lại
-                  </button>
+              <>
+                <div className="flex gap-2 mb-4">
+                  {!isDrawingROI ? (
+                    <>
+                      <button
+                        onClick={startROIDrawing}
+                        disabled={isStreaming}
+                        className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                        {roi ? 'Chỉnh sửa vùng cấm' : 'Vẽ vùng cấm'}
+                      </button>
+                      {roi && (
+                        <button
+                          onClick={clearROI}
+                          disabled={isStreaming}
+                          className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          Xóa vùng
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex-1 bg-cyan-500/10 border border-cyan-500/30 rounded-lg px-4 py-2 text-cyan-400 text-sm">
+                      👆 Click và kéo trên video để vẽ vùng cấm (DANGER ZONE)
+                    </div>
+                  )}
+                </div>
+
+                {/* ROI Info for Video */}
+                {roi && !isDrawingROI && (
+                  <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-3 mb-4">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-cyan-400 font-semibold">🎯 Vùng cấm đã thiết lập</span>
+                      <span className="text-cyan-300">{roi.w}×{roi.h}px tại ({roi.x}, {roi.y})</span>
+                    </div>
+                  </div>
                 )}
-              </div>
+
+                {/* Control Buttons */}
+                <div className="flex gap-3">
+                  {!isStreaming ? (
+                    <button
+                      onClick={startStreaming}
+                      className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2"
+                    >
+                      <Play className="w-5 h-5" />
+                      Bắt đầu phát hiện
+                    </button>
+                  ) : (
+                    <button
+                      onClick={stopStreaming}
+                      className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2"
+                    >
+                      <Square className="w-5 h-5" />
+                      Dừng lại
+                    </button>
+                  )}
+                </div>
+              </>
             )}
           </div>
 

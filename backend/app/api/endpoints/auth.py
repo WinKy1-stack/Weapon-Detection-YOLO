@@ -5,16 +5,16 @@ from fastapi import APIRouter, Depends, HTTPException, status, Form
 from datetime import timedelta, datetime
 import uuid
 
-from backend.app.core.config import settings
-from backend.app.core.security import (
+from app.core.config import settings
+from app.core.security import (
     get_password_hash,
     verify_password,
     create_access_token,
     get_current_user,
 )
-from backend.app.core.database import get_database
-from backend.app.schemas.user import UserCreate, UserLogin, UserResponse, Token
-from backend.app.models.user import UserModel
+from app.core.database import get_database
+from app.schemas.user import UserCreate, UserLogin, UserResponse, Token
+from app.models.user import UserModel
 
 router = APIRouter()
 

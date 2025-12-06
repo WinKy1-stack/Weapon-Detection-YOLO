@@ -20,8 +20,19 @@ export default function Alerts() {
   const fetchAlerts = async () => {
     try {
       setLoading(true);
-      const response = await alertsAPI.getAlerts(filters);
-      setAlerts(response.alerts || []);
+      // Remove empty filter values
+      const cleanFilters = Object.fromEntries(
+        Object.entries(filters).filter(([_, value]) => value !== '' && value !== null)
+      );
+      const response = await alertsAPI.getAlerts(cleanFilters);
+      const alertsData = response.data?.alerts || response.alerts || [];
+      // Map _id to id for frontend compatibility
+      const mappedAlerts = alertsData.map(alert => ({
+        ...alert,
+        id: alert._id || alert.id,
+        timestamp: alert.timestamp || alert.created_at
+      }));
+      setAlerts(mappedAlerts);
     } catch (error) {
       console.error('Error fetching alerts:', error);
       toast.error('Không thể tải danh sách cảnh báo');

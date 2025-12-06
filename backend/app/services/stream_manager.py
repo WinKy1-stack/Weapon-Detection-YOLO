@@ -3,7 +3,7 @@ Stream Manager - Singleton service to manage multiple camera streams
 """
 from typing import Dict, Optional
 import logging
-from backend.app.services.camera_stream import CameraStream
+from app.services.camera_stream import CameraStream
 
 logger = logging.getLogger(__name__)
 

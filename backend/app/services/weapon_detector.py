@@ -10,7 +10,7 @@ import logging
 import os
 from pathlib import Path
 
-from backend.app.core.config import settings
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +201,95 @@ class WeaponDetector:
                 (255, 255, 255), 
                 2
             )
+        
+        return annotated
+    
+    def filter_by_roi(self, detections: List[Dict], roi_box: List[int]) -> List[Dict]:
+        """
+        Filter detections by Region of Interest (ROI)
+        Only keep detections where center point is inside ROI
+        
+        Args:
+            detections: List of detections
+            roi_box: ROI bounding box [x, y, w, h]
+            
+        Returns:
+            Filtered detections inside ROI
+        """
+        if not roi_box or len(roi_box) != 4:
+            return detections
+        
+        x, y, w, h = roi_box
+        filtered = []
+        
+        for det in detections:
+            bbox = det['bbox']
+            # Calculate detection center point
+            center_x = (bbox[0] + bbox[2]) / 2
+            center_y = (bbox[1] + bbox[3]) / 2
+            
+            # Check if center is inside ROI
+            if (x <= center_x <= x + w and y <= center_y <= y + h):
+                filtered.append(det)
+        
+        return filtered
+    
+    def draw_roi(self, frame: np.ndarray, roi_box: List[int], color=(255, 255, 0), thickness=3) -> np.ndarray:
+        """
+        Draw ROI rectangle on frame
+        
+        Args:
+            frame: Input image
+            roi_box: ROI bounding box [x, y, w, h]
+            color: BGR color tuple (default: cyan)
+            thickness: Line thickness
+            
+        Returns:
+            Frame with ROI drawn
+        """
+        if not roi_box or len(roi_box) != 4:
+            return frame
+        
+        annotated = frame.copy()
+        x, y, w, h = roi_box
+        
+        # Draw ROI rectangle
+        cv2.rectangle(annotated, (x, y), (x + w, y + h), color, thickness)
+        
+        # Draw ROI label
+        label = "DANGER ZONE"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.8
+        font_thickness = 2
+        (text_w, text_h), _ = cv2.getTextSize(label, font, font_scale, font_thickness)
+        
+        # Draw label background
+        cv2.rectangle(
+            annotated,
+            (x, y - text_h - 10),
+            (x + text_w + 10, y),
+            color,
+            -1
+        )
+        
+        # Draw label text
+        cv2.putText(
+            annotated,
+            label,
+            (x + 5, y - 5),
+            font,
+            font_scale,
+            (0, 0, 0),  # Black text
+            font_thickness
+        )
+        
+        # Draw corner markers
+        marker_size = 15
+        corners = [
+            (x, y), (x + w, y), (x, y + h), (x + w, y + h)
+        ]
+        for cx, cy in corners:
+            cv2.circle(annotated, (cx, cy), marker_size//2, color, -1)
         
         return annotated
     

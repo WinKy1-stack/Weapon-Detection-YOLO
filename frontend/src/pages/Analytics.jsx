@@ -41,7 +41,8 @@ export default function Analytics() {
   const fetchStats = async () => {
     try {
       setLoading(true);
-      const data = await alertsAPI.getAlertStats(7);
+      const response = await alertsAPI.getAlertStats(7);
+      const data = response.data || response;
       setStats(data);
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -54,7 +55,8 @@ export default function Analytics() {
   const fetchAlerts = async () => {
     try {
       const response = await alertsAPI.getAlerts({ limit: 100 });
-      setAlerts(response.data?.alerts || response.alerts || []);
+      const alertsData = response.data || response;
+      setAlerts(alertsData?.alerts || []);
     } catch (error) {
       console.error('Error fetching alerts:', error);
     }
