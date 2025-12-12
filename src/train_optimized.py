@@ -7,7 +7,7 @@ def train_stable():
     results = model.train(
         data="dataset/data.yaml",
         epochs=100,
-        batch=8,             # vẫn ổn cho RTX 3050
+        batch=16,             # vẫn ổn cho RTX 3050
         imgsz=640,
         device=0,
         workers=2,           # giảm worker để tránh MemoryError
