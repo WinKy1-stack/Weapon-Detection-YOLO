@@ -80,8 +80,11 @@ class CameraStream:
             source = int(self.rtsp_url) if self.rtsp_url.isdigit() else self.rtsp_url
             self._cap = cv2.VideoCapture(source)
             
-            # Set buffer size to 1 to reduce latency
-            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            # OPTIMIZATION: Minimize latency for real-time detection
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Smallest buffer
+            self._cap.set(cv2.CAP_PROP_FPS, 30)  # Set to 30 FPS
+            # Grab latest frame immediately
+            self._cap.grab()
             
             # Test if camera opened successfully
             if not self._cap.isOpened():
@@ -132,7 +135,12 @@ class CameraStream:
             
             # Try to read frame
             try:
-                ret, frame = self._cap.read()
+                # OPTIMIZATION: Skip buffered frames and get latest
+                # Grab multiple times to clear buffer and get fresh frame
+                for _ in range(2):  # Clear 2 buffered frames
+                    self._cap.grab()
+                
+                ret, frame = self._cap.retrieve()
                 
                 if not ret or frame is None:
                     logger.warning(f"[{self.camera_id}] ❌ Lost connection (frame read failed)")
@@ -145,8 +153,8 @@ class CameraStream:
                     self._frame = frame
                     self._last_frame_time = time.time()
                 
-                # Small sleep to prevent CPU overload (adjust based on camera FPS)
-                time.sleep(0.01)  # ~100 FPS max read rate
+                # Small sleep to prevent CPU overload (reduce for lower latency)
+                time.sleep(0.005)  # ~200 FPS max read rate for lower latency
                 
             except Exception as e:
                 logger.error(f"[{self.camera_id}] Error reading frame: {str(e)}")

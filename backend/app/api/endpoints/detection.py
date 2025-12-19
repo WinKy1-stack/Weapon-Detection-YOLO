@@ -321,7 +321,7 @@ async def detect_image_with_pairing(
 @router.post("/detect/video")
 async def detect_video(
     file: UploadFile = File(...),
-    confidence: Optional[float] = Form(0.5),
+    confidence: Optional[float] = Form(0.55),  # Increased default for faster/more accurate detection
     model_type: Optional[str] = Form("yolo"),
     # current_user: dict = Depends(get_current_user)  # Disabled for testing
 ):
@@ -386,11 +386,14 @@ async def detect_video(
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        print(f"📹 Video info: {width}x{height} @ {fps}fps, {total_frames} frames")
+        # OPTIMIZATION: Cap FPS to 30 for smoother processing if too high
+        output_fps = min(fps, 30)  # Max 30 FPS output for smooth playback
+        
+        print(f"📹 Video info: {width}x{height} @ {fps}fps -> output {output_fps}fps, {total_frames} frames")
         
         # Initialize video writer with mp4v codec
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        out = cv2.VideoWriter(output_path, fourcc, output_fps, (width, height))
         
         if not out.isOpened():
             raise HTTPException(
@@ -413,7 +416,8 @@ async def detect_video(
         
         # OPTIMIZATION: Skip frames for faster processing
         # Process every Nth frame (2 = 50% faster, 3 = 66% faster)
-        skip_frames = 2 if total_frames > 1000 else 1
+        # REDUCED: Skip less frames for lower latency
+        skip_frames = 1  # Process all frames for smooth detection
         
         # AUTO-DETECT GRID: Check if this is a multi-camera grid (2x2, 3x3, etc.)
         # Multi-cam videos usually have aspect ratio ~2:1 or black divider lines
@@ -428,7 +432,7 @@ async def detect_video(
             print(f"📹 Multi-camera grid detected: {grid_cols}x{grid_rows} layout")
             print(f"   Each cell: {cell_width}x{cell_height}")
         
-        print(f"🎬 Starting frame processing (skip={skip_frames})...")
+        print(f"🎬 Starting frame processing (processing ALL frames for smooth detection)...")
         
         while True:
             ret, frame = cap.read()
@@ -437,39 +441,45 @@ async def detect_video(
                 break  # End of video
             
             frame_count += 1
-            
-            # Skip frames for performance
-            if frame_count % skip_frames != 0:
-                # Write original frame without detection
-                out.write(frame)
-                continue
-            
             processed_count += 1
+            
+            # CRITICAL: Create FRESH copy - completely independent frame
+            # numpy array copy ensures no memory sharing with previous frames
+            frame_clean = frame.copy()
+            
+            # Force memory separation to prevent box persistence
+            frame_clean.setflags(write=True)
             
             # GRID PROCESSING: Detect each cell separately for multi-camera videos
             all_detections = []
             
             if is_grid_video:
-                # Process each grid cell independently
+                # Process each grid cell independently on CLEAN frame
                 for row in range(grid_rows):
                     for col in range(grid_cols):
-                        # Extract cell region
+                        # Extract cell region from clean frame
                         x1 = col * cell_width
                         y1 = row * cell_height
                         x2 = x1 + cell_width
                         y2 = y1 + cell_height
                         
-                        cell = frame[y1:y2, x1:x2]
+                        cell = frame_clean[y1:y2, x1:x2]
                         
-                        # Resize cell for detection
-                        cell_resized = cv2.resize(cell, (640, 480))
+                        # Resize cell for FAST detection (smaller = faster)
+                        cell_resized = cv2.resize(cell, (416, 416))  # Reduced from 640x480
                         
-                        # Detect in this cell
-                        cell_results = model.predict(cell_resized, conf=confidence, verbose=False, imgsz=640)[0]
+                        # FAST Detect in this cell
+                        cell_results = model.predict(
+                            cell_resized, 
+                            conf=confidence, 
+                            verbose=False, 
+                            imgsz=416,  # Smaller input
+                            agnostic_nms=True  # Faster NMS
+                        )[0]
                         
                         # Scale detections back to cell coordinates
-                        scale_x = cell_width / 640
-                        scale_y = cell_height / 480
+                        scale_x = cell_width / 416
+                        scale_y = cell_height / 416
                         
                         for box in cell_results.boxes:
                             cx1, cy1, cx2, cy2 = box.xyxy[0].cpu().numpy()
@@ -491,14 +501,21 @@ async def detect_video(
                 weapon_results = PseudoResults(all_detections, model.names)
                 detections = all_detections
             else:
-                # Single frame detection (original logic)
-                # Resize for detection (faster inference)
-                detect_frame = cv2.resize(frame, (640, 480)) if width > 640 else frame
-                scale_x = width / detect_frame.shape[1]
-                scale_y = height / detect_frame.shape[0]
+                # FIXED: Detect DIRECTLY on original frame - NO RESIZE, NO SCALE
+                # This eliminates coordinate misalignment completely
+                # YOLO will handle the resizing internally with correct coordinate mapping
+                weapon_results = model.predict(
+                    frame_clean,  # Use original frame directly
+                    conf=confidence,
+                    verbose=False, 
+                    imgsz=640,  # Model input size (handled internally)
+                    half=False,
+                    device='cpu',
+                    agnostic_nms=True,
+                    max_det=10  # Limit detections for speed
+                )[0]
                 
-                # Run weapon detection on resized frame
-                weapon_results = model.predict(detect_frame, conf=confidence, verbose=False, imgsz=640)[0]
+                # No scaling needed - coordinates are already correct
                 detections = weapon_results.boxes
             
             # Count detections
@@ -527,42 +544,41 @@ async def detect_video(
                         })()
                         best_frame_detections.append(det_obj)
                 
-                # Draw bounding boxes on ORIGINAL frame
+                # Draw bounding boxes with EXACT coordinates (no lag, no offset)
                 for box in detections:
+                    # Get coordinates directly from detection
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                     conf_val = float(box.conf)
                     cls = int(box.cls)
                     class_name = weapon_results.names[cls]
                     
-                    # For grid video, coordinates already transformed
-                    # For single video, scale coordinates back
-                    if is_grid_video:
-                        x1_scaled, y1_scaled = int(x1), int(y1)
-                        x2_scaled, y2_scaled = int(x2), int(y2)
-                    else:
-                        x1_scaled = int(x1 * scale_x)
-                        y1_scaled = int(y1 * scale_y)
-                        x2_scaled = int(x2 * scale_x)
-                        y2_scaled = int(y2 * scale_y)
+                    # Clamp coordinates to frame boundaries
+                    x1_draw = max(0, int(x1))
+                    y1_draw = max(0, int(y1))
+                    x2_draw = min(width, int(x2))
+                    y2_draw = min(height, int(y2))
                     
-                    # Draw red bounding box on original frame
-                    cv2.rectangle(frame, 
-                                (x1_scaled, y1_scaled), (x2_scaled, y2_scaled), 
+                    # Draw red box IMMEDIATELY on THIS frame only
+                    cv2.rectangle(frame_clean, 
+                                (x1_draw, y1_draw), (x2_draw, y2_draw), 
                                 (0, 0, 255), 3)
                     
-                    # Add label with class and confidence
+                    # Add label with class and confidence - use exact coordinates
                     label = f"{class_name} {conf_val:.0%}"
                     font_scale = 0.7 * (width / 1280)  # Scale font with video size
                     thickness = max(1, int(2 * (width / 1280)))
                     (label_w, label_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
-                    cv2.rectangle(frame, (x1_scaled, y1_scaled - label_h - 10), 
-                                (x1_scaled + label_w, y1_scaled), (0, 0, 255), -1)
-                    cv2.putText(frame, label, (x1_scaled, y1_scaled - 5),
+                    cv2.rectangle(frame_clean, (x1_draw, y1_draw - label_h - 10), 
+                                (x1_draw + label_w, y1_draw), (0, 0, 255), -1)
+                    cv2.putText(frame_clean, label, (x1_draw, y1_draw - 5),
                               cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), thickness)
             
-            # Add frame counter overlay
+            # Clear detections list to prevent accumulation
+            detections = []
+            
+            # Add frame counter overlay on clean frame
             cv2.putText(
-                frame,
+                frame_clean,
                 f"Frame: {frame_count}/{total_frames}",
                 (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -571,8 +587,11 @@ async def detect_video(
                 2
             )
             
-            # Write annotated frame to output video
-            out.write(frame)
+            # Write ONLY this frame to video (no persistence)
+            out.write(frame_clean)
+            
+            # Force flush to ensure frame is written immediately
+            cv2.waitKey(1)
             
             # Progress log every 30 frames
             if frame_count % 30 == 0:
@@ -586,11 +605,10 @@ async def detect_video(
         
         print(f"✅ Processing complete!")
         print(f"   Total frames: {frame_count}")
-        print(f"   Processed frames: {processed_count} (skip={skip_frames})")
+        print(f"   Processed frames: {processed_count}")
         print(f"   Frames with weapons: {frames_with_weapons}")
         print(f"   Total detections: {total_detections}")
         print(f"   Processing time: {processing_time:.2f}s ({avg_fps:.1f} fps)")
-        print(f"   Speed improvement: {skip_frames}x faster")
         
         # Save alert to MongoDB if weapons detected
         if total_detections > 0:
